@@ -7,7 +7,11 @@ from sys import byteorder
 from array import array
 from struct import pack
 from utils import extract_feature
-
+import sqlite3
+from flask import *
+import json
+import uuid
+import sqlite3
 
 ##--------- Settings to record audio -----##
 THRESHOLD = 500
@@ -155,39 +159,86 @@ def register_user(userName,mfcc_rms,chroma_rms):
 ##----Functions when there is already an audio file---####
 ##def recorded_file(sample_rate, data, filename):
 
-
-#-----Variables that comes from the User Interfaz / API----#
-"Flag to indicate if audio is recorded (False) or if python has to record it (true)"
-ISRECORDED = True
-"Flag to indicate if user is new (False) or already registered (true)"
-isRegistered = True
-"If it is a new user, take his\her name - update in the corresponding API"
-userName="Pat"
+##--------------------------------- Functions for API Code -----------------------##
 
 
-if __name__ == "__main__":
+app = Flask(__name__) #creating a flask app
+
+# Function to Connect with the database / TO CREATE DATABASE
+@app.route('/', methods=['GET'])
+def go_home():
+    c = sqlite3.connect("user.db").cursor() # create a database and return the console to that database
+    c.execute("CREATE TABLE IF NOT EXISTS USERS("
+              "id TEXT, username TEXT, audio TEXT, isRegistered TEXT)"
+              )
+    c.connection.close()
+    return 'Welcome ALTER - API!'
+
+@app.route('/users', methods=['GET'])
+def get_users():
+    c = sqlite3.connect("user.db").cursor()
+    c.execute("SELECT * FROM USERS")
+    data = c.fetchall()
+    return jsonify(data)
+
+@app.route('/addUser', methods=['POST'])
+def add_user():
+    db = sqlite3.connect("user.db")
+    c = db.cursor()
+    user = User(request.form["username"],
+                request.form["audio"],
+                request.form["isRegistered"]
+                )
+
+    # execute the voice and speech recognition code
+    voice_speech_recognition(user.username,float(user.audio),float(user.isRegistered))
+
+    c.execute("INSERT INTO USERS VALUES(?,?,?,?)",
+              (user.id, user.username, user.audio, user.isRegistered))
+    db.commit()
+    data = c.lastrowid
+    return json.dumps(data)
+
+class User:
+
+    def __init__(self, username, audio, isRegistered):
+        self.id = uuid.uuid4().hex
+        self.username = username
+        self.audio = audio
+        self.isRegistered = isRegistered
+
+    def __str__(self):
+        return f'id:{self.id} ' \
+               f'username: {self.username}; ' \
+               f'Audio: {self.audio}; ' \
+               f'IsRegistered: {self.isRegistered}'\
+
+##--------------------------------- Finish Functions for API Code -----------------------##
+
+def voice_speech_recognition(userName,isAudioRecorded,isRegistered):
     # load the saved model for emotion recognition (after training)
     model = pickle.load(open("result/classifier_table.model", "rb"))
 
-    if  ISRECORDED:
+    if isAudioRecorded:
         print("Please talk")
         filename = "test.wav"
         record_to_file(filename)
     else:
-        # These functions are going to standarize the final audio in order to process it - working on this
-        filename = 'test-r.wav'
-        data, samplerate = audiofile.read(filename)
-        recorded_file(samplerate, data, filename)  # already recorded a file
-        print("Audio loaded")
+        print("An audio file is needed")
+        #These functions are going to standarize the final audio in order to process it - working on this
+        #filename = 'test-r.wav'
+        #data, samplerate = audiofile.read(filename)
+        #recorded_file(samplerate, data, filename)  # already recorded a file
+        #print("Audio loaded")
 
     # Get mfcc for user registration / identification
     mfcc_rms, chroma_rms = rms_values(filename)
 
     if isRegistered:
-        userName=identify_user(mfcc_rms,chroma_rms)
-        print("User found as",userName)
+        userName = identify_user(mfcc_rms, chroma_rms)
+        print("User found as", userName)
     else:
-        register_user(userName,mfcc_rms,chroma_rms)
+        register_user(userName, mfcc_rms, chroma_rms)
         print("User Registered as", userName)
 
     # extract features and reshape it
@@ -196,4 +247,9 @@ if __name__ == "__main__":
     result = model.predict(features)[0]
     # show the result !
     print(userName + " is " + result)
+
+if __name__ == "__main__":
+
+    app.run(port=8800)
+
 
